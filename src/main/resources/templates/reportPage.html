@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Instructor Reports</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Light gray background */
+        }
+        /* Custom styles for better default appearance if Tailwind doesn't cover everything */
+        select, button, input[type="text"] {
+            transition: all 0.2s ease-in-out;
+        }
+        select:focus, button:focus, input[type="text"]:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.5); /* Blue focus ring */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-8 px-4 sm:px-6 lg:px-8">
+
+    <nav class="w-full max-w-4xl bg-white shadow-lg rounded-xl p-4 mb-8 flex justify-between items-center">
+        <div class="text-2xl font-bold text-gray-800">Instructor Dashboard</div>
+        <div class="flex space-x-6">
+            <a href="#" class="text-gray-600 hover:text-blue-600 font-medium transition duration-300 ease-in-out">Profile</a>
+            <a href="/home" class="text-gray-600 hover:text-blue-600 font-medium transition duration-300 ease-in-out">My Courses</a>
+            <a href="/instructor/reports" class="text-blue-600 font-semibold border-b-2 border-blue-600 pb-1">Reports</a>
+        </div>
+    </nav>
+
+    <div class="w-full max-w-4xl bg-white shadow-lg rounded-xl p-8">
+        <h1 class="text-4xl font-extrabold text-gray-900 mb-6 text-center">Instructor Reports</h1>
+
+        <div class="bg-blue-50 border border-blue-200 text-blue-800 p-6 rounded-lg mb-8 shadow-sm">
+            <p class="text-lg font-medium">Welcome, <span th:text="${user.name}" class="font-semibold text-blue-900"></span>!</p>
+            <p class="text-md mt-1">Email: <span th:text="${user.email}" class="font-normal text-blue-700"></span></p>
+        </div>
+
+        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Select a Course to View Reports</h2>
+        <div class="flex flex-col sm:flex-row gap-4 mb-8 items-center">
+            <select id="courseSelect" class="flex-grow p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 text-gray-700">
+                <option value="">-- Select a Course --</option>
+                <option th:each="course : ${courses}"
+                        th:value="${course.id}"
+                        th:text="${course.title}"></option>
+            </select>
+            <button onclick="getStudentReports()"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-full sm:w-auto">
+                Get Report
+            </button>
+        </div>
+
+        <div id="studentReportsContainer">
+            <h3 class="text-2xl font-semibold text-gray-800 mb-4">Student Reports for Selected Course</h3>
+            <div class="overflow-x-auto bg-white rounded-lg shadow-md mb-8">
+                <table id="studentReportsTable" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rounded-tl-lg">Student Name</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grade</th> <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rounded-tr-lg">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        <tr><td colspan="4" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center no-data">Select a course to view reports.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-6 h-96 overflow-hidden">
+                <h3 class="text-2xl font-semibold text-gray-800 mb-4">Student Progress Visualisation</h3>
+                <canvas id="studentProgressChart"></canvas>
+                <p id="chartNoData" class="text-center text-gray-500 mt-4 hidden">No data available for chart.</p>
+            </div>
+        </div>
+    </div>
+
+    <script th:inline="javascript">
+        // Global variable to hold the Chart.js instance
+        let studentProgressChartInstance = null;
+
+        function getStudentReports() {
+            const courseId = document.getElementById('courseSelect').value;
+            const reportsTableBody = document.querySelector('#studentReportsTable tbody');
+            const chartCanvas = document.getElementById('studentProgressChart');
+            const chartNoDataMessage = document.getElementById('chartNoData');
+
+            // Hide chart and message initially
+            chartCanvas.style.display = 'none';
+            chartNoDataMessage.style.display = 'none';
+
+            if (!courseId) {
+                reportsTableBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center no-data">Please select a course.</td></tr>';
+                // Destroy existing chart if any
+                if (studentProgressChartInstance) {
+                    studentProgressChartInstance.destroy();
+                    studentProgressChartInstance = null;
+                }
+                return;
+            }
+
+            // Clear previous reports and show a loading indicator
+            reportsTableBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">Loading reports...</td></tr>';
+            
+            // Destroy existing chart while loading
+            if (studentProgressChartInstance) {
+                studentProgressChartInstance.destroy();
+                studentProgressChartInstance = null;
+            }
+
+            // Using fetch API to make an AJAX call
+            fetch(`/api/instructor/reports?courseId=${courseId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(reports => {
+                    reportsTableBody.innerHTML = ''; // Clear loading indicator
+                    if (reports.length === 0) {
+                        reportsTableBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center no-data">No student reports found for this course.</td></tr>';
+                        chartNoDataMessage.style.display = 'block'; // Show no data message for chart
+                    } else {
+                        const studentNames = [];
+                        const studentProgress = [];
+                        
+                        reports.forEach(report => {
+                            const row = reportsTableBody.insertRow();
+                            row.className = 'hover:bg-gray-50'; // Add hover effect to rows
+                            
+                            // Student Name
+                            let nameCell = row.insertCell();
+                            nameCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900';
+                            nameCell.textContent = report.name || 'N/A'; 
+
+                            // Progress
+                            let progressCell = row.insertCell();
+                            progressCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
+                            progressCell.textContent = report.progress !== undefined ? report.progress : 'N/A'; 
+                            
+                            // Grade (New Column)
+                            let gradeCell = row.insertCell();
+                            gradeCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
+                            gradeCell.textContent = report.grade || 'N/A'; // Assuming 'grade' property exists
+
+                            // Actions
+                            let actionsCell = row.insertCell();
+                            actionsCell.className = 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium';
+                            actionsCell.innerHTML = '<a href="#" class="text-blue-600 hover:text-blue-900">View Details</a>'; 
+
+                            // Collect data for chart
+                            if (report.name && report.progress !== undefined) {
+                                studentNames.push(report.name);
+                                studentProgress.push(report.progress);
+                            }
+                        });
+
+                        // Render the chart
+                        if (studentNames.length > 0) {
+                            chartCanvas.style.display = 'block'; // Show the chart canvas
+                            const ctx = chartCanvas.getContext('2d');
+                            studentProgressChartInstance = new Chart(ctx, {
+                                type: 'bar', // Can be 'bar', 'line', 'pie', etc.
+                                data: {
+                                    labels: studentNames,
+                                    datasets: [{
+                                        label: 'Student Progress',
+                                        data: studentProgress,
+                                        backgroundColor: 'rgba(59, 130, 246, 0.6)', // Tailwind blue-500 with opacity
+                                        borderColor: 'rgba(37, 99, 235, 1)', // Tailwind blue-600
+                                        borderWidth: 1
+                                    }]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false, // Allows chart to fill container
+                                    scales: {
+                                        y: {
+                                            beginAtZero: true,
+                                            max: 100, // Set the maximum value of the y-axis to 100
+                                            title: {
+                                                display: true,
+                                                text: 'Progress Score'
+                                            }
+                                        },
+                                        x: {
+                                            title: {
+                                                display: true,
+                                                text: 'Student Name'
+                                            }
+                                        }
+                                    },
+                                    plugins: {
+                                        legend: {
+                                            display: false // Hide legend if only one dataset
+                                        },
+                                        tooltip: {
+                                            callbacks: {
+                                                label: function(context) {
+                                                    let label = context.dataset.label || '';
+                                                    if (label) {
+                                                        label += ': ';
+                                                    }
+                                                    if (context.parsed.y !== null) {
+                                                        label += context.parsed.y;
+                                                    }
+                                                    return label;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        } else {
+                            chartNoDataMessage.style.display = 'block'; // Show no data message for chart
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching student reports:', error);
+                    reportsTableBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 whitespace-nowrap text-sm text-red-600 text-center">Error loading reports. Please try again.</td></tr>';
+                    chartNoDataMessage.style.display = 'block'; // Show no data message for chart
+                });
+        }
+    </script>
+</body>
+</html>
